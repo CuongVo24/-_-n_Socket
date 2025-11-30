@@ -43,6 +43,7 @@ class Client:
         self.connectToServer()
         print(">>> ĐÃ KẾT NỐI SERVER XONG, CHUẨN BỊ KẾT THÚC INIT")
         self.frameNbr = 0
+        self.currentFrameBuffer = bytearray()
         
         # [NEW] Khởi tạo Buffer
         self.frameBuffer = queue.Queue() 
@@ -113,32 +114,45 @@ class Client:
             self.playEvent.clear()
             self.sendRtspRequest(self.PLAY)
 
+# Thêm biến này vào __init__ của Client
+    # self.currentFrameBuffer = bytearray() 
+
     def listenRtp(self):
         """Listen for RTP packets (PRODUCER)."""
+        current_frame_buffer = bytearray() # Bộ đệm lắp ghép frame
+
         while True:
             try:
                 data = self.rtpSocket.recv(20480)
                 if data:
                     rtpPacket = RtpPacket()
                     rtpPacket.decode(data)
+                    
+                    # Lấy marker
+                    is_last_packet = rtpPacket.getMarker() # Hàm mới thêm ở Bước 1
+                    
+                    # Ghép payload vào bộ đệm tạm
+                    current_frame_buffer += rtpPacket.getPayload()
 
-                    currFrameNbr = rtpPacket.seqNum()
-                    # print("Received Seq Num: " + str(currFrameNbr))
-
-                    if currFrameNbr > self.frameNbr:  # Discard the late packet
+                    # Nếu là gói cuối cùng của frame (Marker = 1)
+                    if is_last_packet == 1:
+                        currFrameNbr = rtpPacket.seqNum()
+                        
+                        # Logic kiểm tra frame cũ (optional, tùy chỉnh)
+                        # if currFrameNbr > self.frameNbr: ...
+                        
                         self.frameNbr = currFrameNbr
                         
-                        # [MODIFIED] Thay vì updateMovie ngay, ta đẩy vào Buffer
-                        # Chỉ đẩy phần Payload (ảnh JPEG) vào hàng đợi
-                        self.frameBuffer.put(rtpPacket.getPayload()) 
+                        # Đẩy frame hoàn chỉnh vào hàng đợi Buffer (Cache)
+                        # Chuyển bytearray về bytes để lưu file
+                        self.frameBuffer.put(bytes(current_frame_buffer))
+                        
+                        # Reset bộ đệm lắp ghép cho frame tiếp theo
+                        current_frame_buffer = bytearray()
                         
             except:
-                # Stop listening upon requesting PAUSE or TEARDOWN
                 if self.playEvent.isSet():
                     break
-
-                # Upon receiving ACK for TEARDOWN request,
-                # close the RTP socket
                 if self.teardownAcked == 1:
                     self.rtpSocket.shutdown(socket.SHUT_RDWR)
                     self.rtpSocket.close()
