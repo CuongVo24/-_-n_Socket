@@ -159,21 +159,20 @@ class ServerWorker:
                     print(f"Connection Error: {e}")
                     break
 
-    def makeRtp(self, payload, frameNbr):
+# Sửa dòng định nghĩa hàm
+    def makeRtp(self, payload, frameNbr, marker=0): # Thêm tham số marker
         """RTP-packetize the video data."""
         version = 2
         padding = 0
         extension = 0
         cc = 0
-        marker = 0
-        pt = 26  # MJPEG type
+        # marker = 0  <-- XÓA DÒNG NÀY (vì đã dùng tham số truyền vào)
+        pt = 26
         seqnum = frameNbr
         ssrc = 0
 
         rtpPacket = RtpPacket()
-
         rtpPacket.encode(version, padding, extension, cc, seqnum, marker, pt, ssrc, payload)
-
         return rtpPacket.getPacket()
 
     def replyRtsp(self, code, seq):
@@ -189,4 +188,5 @@ class ServerWorker:
             print("404 NOT FOUND")
         elif code == self.CON_ERR_500:
             print("500 CONNECTION ERROR")
+
 
