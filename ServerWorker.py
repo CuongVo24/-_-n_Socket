@@ -112,7 +112,12 @@ class ServerWorker:
             self.clientInfo['rtpSocket'].close()
 
     def sendRtp(self):
-        """Send RTP packets over UDP."""
+       """Send RTP packets over UDP."""
+        # Kích thước tối đa payload (để chừa chỗ cho Header IP/UDP/RTP)
+        # MTU ~ 1500, trừ đi header IP(20) + UDP(8) + RTP(12) = 1460.
+        # Chọn 1400 cho an toàn.
+        MAX_RTP_PAYLOAD = 1400 
+        
         while True:
             self.clientInfo['event'].wait(0.05)
 
@@ -121,21 +126,38 @@ class ServerWorker:
                 break
 
             data = self.clientInfo['videoStream'].nextFrame()
+            
             if data:
                 frameNumber = self.clientInfo['videoStream'].frameNbr()
                 try:
                     address = self.clientInfo['rtspSocket'][1][0]
                     port = int(self.clientInfo['rtpPort'])
-                    self.clientInfo['rtpSocket'].sendto(self.makeRtp(data, frameNumber), (address, port))
-                except Exception as e:  # Sửa lại để bắt và in ra lỗi cụ thể
-                    print(f"Connection Error while sending RTP packet: {e}")
-                    # In thêm thông tin để debug
-                    print(f"  - Target address: {address}")
-                    print(f"  - Target port: {self.clientInfo.get('rtpPort', 'NOT FOUND')}")
-                    break  # Thoát khỏi vòng lặp nếu có lỗi
-        # print('-'*60)
-        # traceback.print_exc(file=sys.stdout)
-        # print('-'*60)
+
+                    # --- LOGIC PHÂN MẢNH (FRAGMENTATION) ---
+                    data_len = len(data)
+                    curr_pos = 0
+
+                    while curr_pos < data_len:
+                        # Cắt một đoạn dữ liệu
+                        chunk = data[curr_pos : curr_pos + MAX_RTP_PAYLOAD]
+                        curr_pos += MAX_RTP_PAYLOAD
+                        
+                        # Kiểm tra xem đây có phải gói cuối cùng không?
+                        if curr_pos >= data_len:
+                            marker = 1 # Gói cuối
+                        else:
+                            marker = 0 # Chưa hết frame
+
+                        # Đóng gói và gửi
+                        # Lưu ý: Sequence number phải tăng cho MỖI GÓI TIN (kể cả các mảnh của cùng 1 frame)
+                        # Nhưng Timestamp phải giữ nguyên cho cùng 1 frame (để đơn giản bài này ta bỏ qua Timestamp chuẩn)
+                        self.clientInfo['rtpSocket'].sendto(
+                            self.makeRtp(chunk, frameNumber, marker), # Cần sửa hàm makeRtp để nhận marker
+                            (address, port)
+                        )
+                except Exception as e:
+                    print(f"Connection Error: {e}")
+                    break
 
     def makeRtp(self, payload, frameNbr):
         """RTP-packetize the video data."""
@@ -167,3 +189,4 @@ class ServerWorker:
             print("404 NOT FOUND")
         elif code == self.CON_ERR_500:
             print("500 CONNECTION ERROR")
+
