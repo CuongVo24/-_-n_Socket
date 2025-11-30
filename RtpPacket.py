@@ -1,4 +1,4 @@
-import sys
+import sys 
 from time import time
 
 HEADER_SIZE = 12
@@ -78,3 +78,10 @@ class RtpPacket:
     def getPacket(self):
         """Return RTP packet."""
         return self.header + self.payload
+    def getMarker(self):
+        """Return marker bit (1 bit)."""
+        # Marker nằm ở bit thứ 8 (bit đầu tiên của byte thứ 2)
+        # header[1] có dạng: M_PT_PT_PT_PT_PT_PT_PT
+        # Muốn lấy M, ta dịch phải 7 bit
+        marker = (self.header[1] >> 7) & 1
+        return int(marker)
