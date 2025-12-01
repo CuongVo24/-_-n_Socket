@@ -112,18 +112,22 @@ class Client:
                     self.rtpSocket.close()
                     break
 
-    def update_image_loop(self):
-        """
-        CONSUMER (Main Thread):
-        1. Kiểm tra hàng đợi.
-        2. Lấy ảnh ra và vẽ lên màn hình.
-        3. Logic Buffering: Đợi hàng đợi có ít nhất N ảnh mới bắt đầu chiếu.
-        """
+def update_image_loop(self):
         if self.state == self.PLAYING:
-            # Client-Side Caching Logic
-            # Nếu queue rỗng hoặc ít hơn ngưỡng buffer -> Chờ (Buffering)
-            if self.frameQueue.qsize() < 1: 
-                self.statLabel.config(text=f"Buffering... ({self.frameQueue.qsize()})")
+            # --- LOGIC MỚI: PRE-BUFFERING ---
+            # Nếu chưa đủ frame trong kho và chưa bắt đầu phát mượt mà
+            # Ta có thể thêm 1 biến cờ: self.is_buffering = True ở __init__
+            
+            # Logic đơn giản hóa:
+            if self.frameQueue.qsize() < self.BUFFER_THRESHOLD and not self.playEvent.is_set():
+                 # Đang trong giai đoạn nạp ban đầu, chưa cho hiện
+                 self.statLabel.config(text=f"Pre-buffering... {self.frameQueue.qsize()}/{self.BUFFER_THRESHOLD}")
+                 self.master.after(40, self.update_image_loop)
+                 return
+
+            # Nếu queue cạn kiệt khi đang xem -> Buffering lại
+            if self.frameQueue.qsize() == 0:
+                self.statLabel.config(text="Buffering... (Network lag)")
             else:
                 try:
                     frameData = self.frameQueue.get_nowait()
@@ -131,7 +135,6 @@ class Client:
                 except queue.Empty:
                     pass
             
-            # Gọi lại hàm này sau 40ms (tương đương 25 fps)
             self.master.after(40, self.update_image_loop)
 
     def render_frame_memory(self, data):
