@@ -33,7 +33,9 @@ class Client:
         self.teardownAcked = 0
         self.connectToServer()
         self.frameNbr = 0
-        
+        self.totalPacketsReceived = 0
+        self.expectedSeqNum = 0
+        self.packetLossCount = 0
         # Hàng đợi chứa các frame đã lắp ráp xong (sẵn sàng hiển thị)
         self.frameQueue = queue.Queue(maxsize=200)
         self.playEvent = threading.Event()
@@ -79,38 +81,35 @@ class Client:
             # Bắt đầu vòng lặp cập nhật GUI (Consumer)
             self.master.after(100, self.update_image_loop)
 
-    def listenRtp(self):
-        """
-        PRODUCER THREAD: 
-        1. Nhận dữ liệu từ Server.
-        2. Ghép các mảnh (chunks) lại thành 1 frame hoàn chỉnh.
-        3. Đẩy frame vào hàng đợi (Queue).
-        """
+def listenRtp(self):
         while True:
             try:
-                data = self.rtpSocket.recv(20480) # Tăng buffer socket để nhận gói to
+                data = self.rtpSocket.recv(20480)
                 if data:
                     rtpPacket = RtpPacket()
                     rtpPacket.decode(data)
                     
-                    # Logic ghép phân mảnh (Fragmentation Reassembly)
+                    currSeq = rtpPacket.seqNum()
+                    
+                    # --- THỐNG KÊ PACKET LOSS ---
+                    if self.expectedSeqNum != 0:
+                        # Nếu seq nhận được lớn hơn mong đợi -> Có gói bị mất
+                        if currSeq > self.expectedSeqNum:
+                            loss = currSeq - self.expectedSeqNum
+                            self.packetLossCount += loss
+                            print(f"⚠️ Lost {loss} packets! Total lost: {self.packetLossCount}")
+                    
+                    self.expectedSeqNum = currSeq + 1
+                    self.totalPacketsReceived += 1
+                    # -----------------------------
+
                     payload = rtpPacket.getPayload()
                     self.currentFrameChunks += payload
                     
-                    # Kiểm tra Marker bit. Nếu = 1 nghĩa là đã hết frame này.
                     if rtpPacket.getMarker():
-                        # Đẩy toàn bộ dữ liệu frame vừa ghép vào Queue
                         if not self.frameQueue.full():
                             self.frameQueue.put(self.currentFrameChunks)
-                        
-                        # Reset biến tạm để đón frame tiếp theo
-                        self.currentFrameChunks = bytearray() 
-            except:
-                if self.playEvent.isSet(): break
-                if self.teardownAcked == 1:
-                    self.rtpSocket.shutdown(socket.SHUT_RDWR)
-                    self.rtpSocket.close()
-                    break
+                        self.currentFrameChunks = bytearray()
 
 def update_image_loop(self):
         if self.state == self.PLAYING:
