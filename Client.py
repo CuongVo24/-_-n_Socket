@@ -81,7 +81,7 @@ class Client:
             # Bắt đầu vòng lặp cập nhật GUI (Consumer)
             self.master.after(100, self.update_image_loop)
 
-def listenRtp(self):
+    def listenRtp(self):
         while True:
             try:
                 data = self.rtpSocket.recv(20480)
@@ -110,21 +110,21 @@ def listenRtp(self):
                         if not self.frameQueue.full():
                             self.frameQueue.put(self.currentFrameChunks)
                         self.currentFrameChunks = bytearray()
+            except:
+                if self.playEvent.isSet(): break
+                if self.teardownAcked == 1:
+                    self.rtpSocket.shutdown(socket.SHUT_RDWR)
+                    self.rtpSocket.close()
+                    break
 
-def update_image_loop(self):
+    def update_image_loop(self):
         if self.state == self.PLAYING:
             # --- LOGIC MỚI: PRE-BUFFERING ---
-            # Nếu chưa đủ frame trong kho và chưa bắt đầu phát mượt mà
-            # Ta có thể thêm 1 biến cờ: self.is_buffering = True ở __init__
-            
-            # Logic đơn giản hóa:
             if self.frameQueue.qsize() < self.BUFFER_THRESHOLD and not self.playEvent.is_set():
-                 # Đang trong giai đoạn nạp ban đầu, chưa cho hiện
                  self.statLabel.config(text=f"Pre-buffering... {self.frameQueue.qsize()}/{self.BUFFER_THRESHOLD}")
                  self.master.after(40, self.update_image_loop)
                  return
 
-            # Nếu queue cạn kiệt khi đang xem -> Buffering lại
             if self.frameQueue.qsize() == 0:
                 self.statLabel.config(text="Buffering... (Network lag)")
             else:
