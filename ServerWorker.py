@@ -24,6 +24,7 @@ class ServerWorker:
 
     def __init__(self, clientInfo):
         self.clientInfo = clientInfo
+        self.rtpSequenceNum = 0
 
     def run(self):
         print(">>> ServerWorker.run() called. Starting new thread to listen for requests.")
@@ -141,6 +142,12 @@ class ServerWorker:
                         # Cắt một đoạn dữ liệu
                         chunk = data[curr_pos : curr_pos + MAX_RTP_PAYLOAD]
                         curr_pos += MAX_RTP_PAYLOAD
+                        # Tăng số thứ tự gói tin lên 1
+                        self.rtpSequenceNum += 1
+
+                        # Đóng gói và gửi (Dùng self.rtpSequenceNum thay vì frameNumber)
+                        self.clientInfo['rtpSocket'].sendto(
+                        self.makeRtp(chunk, self.rtpSequenceNum, marker), (address, port)
                         
                         # Kiểm tra xem đây có phải gói cuối cùng không?
                         if curr_pos >= data_len:
@@ -188,5 +195,6 @@ class ServerWorker:
             print("404 NOT FOUND")
         elif code == self.CON_ERR_500:
             print("500 CONNECTION ERROR")
+
 
 
