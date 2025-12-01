@@ -16,8 +16,8 @@ class Client:
     PAUSE = 2
     TEARDOWN = 3
 
-    # Cấu hình Buffer
-    BUFFER_SIZE = 30 # Tăng buffer để mượt hơn
+    # Cấu hình Buffer: Tăng số này lên nếu mạng lag để video mượt hơn
+    BUFFER_THRESHOLD = 20 
     
     def __init__(self, master, serveraddr, serverport, rtpport, filename):
         self.master = master
@@ -34,11 +34,11 @@ class Client:
         self.connectToServer()
         self.frameNbr = 0
         
-        # Hàng đợi frame đã giải mã hoàn chỉnh (sẵn sàng hiển thị)
-        self.frameQueue = queue.Queue(maxsize=100)
+        # Hàng đợi chứa các frame đã lắp ráp xong (sẵn sàng hiển thị)
+        self.frameQueue = queue.Queue(maxsize=200)
         self.playEvent = threading.Event()
         
-        # Biến đệm lắp ráp phân mảnh
+        # Biến tạm để lắp ráp các mảnh (fragmentation) của 1 frame HD
         self.currentFrameChunks = bytearray()
     
     def createWidgets(self):
@@ -76,14 +76,19 @@ class Client:
             threading.Thread(target=self.listenRtp).start()
             self.playEvent.clear()
             self.sendRtspRequest(self.PLAY)
-            # Bắt đầu vòng lặp cập nhật GUI trong Main Thread
+            # Bắt đầu vòng lặp cập nhật GUI (Consumer)
             self.master.after(100, self.update_image_loop)
 
     def listenRtp(self):
-        """Producer Thread: Nhận UDP, ghép phân mảnh, đẩy vào Queue."""
+        """
+        PRODUCER THREAD: 
+        1. Nhận dữ liệu từ Server.
+        2. Ghép các mảnh (chunks) lại thành 1 frame hoàn chỉnh.
+        3. Đẩy frame vào hàng đợi (Queue).
+        """
         while True:
             try:
-                data = self.rtpSocket.recv(20480)
+                data = self.rtpSocket.recv(20480) # Tăng buffer socket để nhận gói to
                 if data:
                     rtpPacket = RtpPacket()
                     rtpPacket.decode(data)
@@ -92,12 +97,14 @@ class Client:
                     payload = rtpPacket.getPayload()
                     self.currentFrameChunks += payload
                     
-                    # Nếu Marker = 1 -> Kết thúc frame
+                    # Kiểm tra Marker bit. Nếu = 1 nghĩa là đã hết frame này.
                     if rtpPacket.getMarker():
-                        # Đẩy frame hoàn chỉnh vào queue
+                        # Đẩy toàn bộ dữ liệu frame vừa ghép vào Queue
                         if not self.frameQueue.full():
                             self.frameQueue.put(self.currentFrameChunks)
-                        self.currentFrameChunks = bytearray() # Reset buffer
+                        
+                        # Reset biến tạm để đón frame tiếp theo
+                        self.currentFrameChunks = bytearray() 
             except:
                 if self.playEvent.isSet(): break
                 if self.teardownAcked == 1:
@@ -106,25 +113,31 @@ class Client:
                     break
 
     def update_image_loop(self):
-        """Consumer (Main Thread): Lấy ảnh từ Queue và vẽ lên màn hình."""
+        """
+        CONSUMER (Main Thread):
+        1. Kiểm tra hàng đợi.
+        2. Lấy ảnh ra và vẽ lên màn hình.
+        3. Logic Buffering: Đợi hàng đợi có ít nhất N ảnh mới bắt đầu chiếu.
+        """
         if self.state == self.PLAYING:
-            # Client-Side Caching Logic: Đợi buffer đầy 1 chút mới chạy
-            if self.frameQueue.qsize() > 0:
+            # Client-Side Caching Logic
+            # Nếu queue rỗng hoặc ít hơn ngưỡng buffer -> Chờ (Buffering)
+            if self.frameQueue.qsize() < 1: 
+                self.statLabel.config(text=f"Buffering... ({self.frameQueue.qsize()})")
+            else:
                 try:
                     frameData = self.frameQueue.get_nowait()
                     self.render_frame_memory(frameData)
                 except queue.Empty:
                     pass
-            else:
-                self.statLabel.config(text="Buffering...")
             
-            # Gọi lại hàm này sau 40ms (25fps)
+            # Gọi lại hàm này sau 40ms (tương đương 25 fps)
             self.master.after(40, self.update_image_loop)
 
     def render_frame_memory(self, data):
-        """Nâng cao: Load ảnh trực tiếp từ RAM (Không ghi đĩa)."""
+        """Load ảnh trực tiếp từ RAM (Không ghi đĩa -> Tối ưu tốc độ)."""
         try:
-            # Sử dụng io.BytesIO để tạo file-like object từ byte array
+            # Biến byte array thành file-like object
             image_stream = io.BytesIO(data)
             image = Image.open(image_stream)
             photo = ImageTk.PhotoImage(image)
