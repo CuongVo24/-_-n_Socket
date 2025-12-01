@@ -1,87 +1,64 @@
-import sys 
+import sys
 from time import time
 
-HEADER_SIZE = 12
-
-
 class RtpPacket:
-    header = bytearray(HEADER_SIZE)
+    HEADER_SIZE = 12
 
     def __init__(self):
-        pass
+        self.header = bytearray(self.HEADER_SIZE)
+        self.payload = bytearray()
 
     def encode(self, version, padding, extension, cc, seqnum, marker, pt, ssrc, payload):
         """Encode the RTP packet with header fields and payload."""
-        timestamp = int(time())
-        header = bytearray(HEADER_SIZE)
-        # --------------
-        # TO COMPLETE
-        # --------------
-        # Fill the header bytearray with RTP header fields
-        header[0] = (version << 6) | (padding << 5) | (extension << 4) | cc
-
-        # Byte 1: Marker, Payload Type
-        # M=0, PT=26
-        # 0 0011010 --> 00011010 (binary) --> 26 (decimal)
-        header[1] = (marker << 7) | pt
-
-        # Bytes 2-3: Sequence Number (16 bits)
-        # Chuyển số 16-bit thành 2 byte (big-endian)
-        header[2] = (seqnum >> 8) & 0xFF
-        header[3] = seqnum & 0xFF
-
-        # Bytes 4-7: Timestamp (32 bits)
-        # Chuyển số 32-bit thành 4 byte
-        header[4] = (timestamp >> 24) & 0xFF
-        header[5] = (timestamp >> 16) & 0xFF
-        header[6] = (timestamp >> 8) & 0xFF
-        header[7] = timestamp & 0xFF
-
-        # Bytes 8-11: SSRC (32 bits)
-        # Chuyển số 32-bit thành 4 byte
-        header[8] = (ssrc >> 24) & 0xFF
-        header[9] = (ssrc >> 16) & 0xFF
-        header[10] = (ssrc >> 8) & 0xFF
-        header[11] = ssrc & 0xFF
-        # Get the payload from the argument
-        self.header = header
+        timestamp = int(time()) # Lấy timestamp hiện tại
+        self.header = bytearray(self.HEADER_SIZE)
+        
+        # Byte 0: V(2) | P(1) | X(1) | CC(4)
+        self.header[0] = (version << 6) | (padding << 5) | (extension << 4) | cc
+        
+        # Byte 1: M(1) | PT(7)
+        self.header[1] = (marker << 7) | (pt & 0x7F)
+        
+        # Byte 2, 3: Sequence Number
+        self.header[2] = (seqnum >> 8) & 0xFF
+        self.header[3] = seqnum & 0xFF
+        
+        # Byte 4, 5, 6, 7: Timestamp
+        self.header[4] = (timestamp >> 24) & 0xFF
+        self.header[5] = (timestamp >> 16) & 0xFF
+        self.header[6] = (timestamp >> 8) & 0xFF
+        self.header[7] = timestamp & 0xFF
+        
+        # Byte 8, 9, 10, 11: SSRC
+        self.header[8] = (ssrc >> 24) & 0xFF
+        self.header[9] = (ssrc >> 16) & 0xFF
+        self.header[10] = (ssrc >> 8) & 0xFF
+        self.header[11] = ssrc & 0xFF
+        
         self.payload = payload
 
     def decode(self, byteStream):
         """Decode the RTP packet."""
-        self.header = bytearray(byteStream[:HEADER_SIZE])
-        self.payload = byteStream[HEADER_SIZE:]
+        self.header = bytearray(byteStream[:self.HEADER_SIZE])
+        self.payload = byteStream[self.HEADER_SIZE:]
 
     def version(self):
-        """Return RTP version."""
         return int(self.header[0] >> 6)
 
     def seqNum(self):
-        """Return sequence (frame) number."""
-        seqNum = self.header[2] << 8 | self.header[3]
-        return int(seqNum)
+        return int(self.header[2] << 8 | self.header[3])
 
     def timestamp(self):
-        """Return timestamp."""
-        timestamp = self.header[4] << 24 | self.header[5] << 16 | self.header[6] << 8 | self.header[7]
-        return int(timestamp)
+        return int(self.header[4] << 24 | self.header[5] << 16 | self.header[6] << 8 | self.header[7])
 
     def payloadType(self):
-        """Return payload type."""
-        pt = self.header[1] & 127
-        return int(pt)
+        return int(self.header[1] & 0x7F)
 
     def getPayload(self):
-        """Return payload."""
         return self.payload
 
     def getPacket(self):
-        """Return RTP packet."""
-        return self.header + self.payload
+        return bytes(self.header) + self.payload
+        
     def getMarker(self):
-        """Return marker bit (1 bit)."""
-        # Marker nằm ở bit thứ 8 (bit đầu tiên của byte thứ 2)
-        # header[1] có dạng: M_PT_PT_PT_PT_PT_PT_PT
-        # Muốn lấy M, ta dịch phải 7 bit
-        marker = (self.header[1] >> 7) & 1
-        return int(marker)
+        return (self.header[1] >> 7) & 1
