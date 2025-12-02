@@ -42,6 +42,8 @@ class Client:
         self.frameQueue = queue.Queue(maxsize=1000)
         self.playEvent = threading.Event()
 
+        self.userPaused = False # Đánh dấu xem người dùng có đang bấm Pause không
+
         # --- THÊM 3 DÒNG NÀY ĐỂ SỬA LỖI CRASH ---
         self.frameQueue = queue.Queue(maxsize=1000)
         self.BUFFER_START_THRESHOLD = 20   # Ngưỡng bắt đầu phát (cần 20 frame)
@@ -93,16 +95,31 @@ class Client:
         self.master.destroy()
 
     def pauseMovie(self):
+        """Xử lý nút Pause: Đánh dấu userPaused để chặn tự động phát."""
         if self.state == self.PLAYING:
-            self.sendRtspRequest(self.PAUSE)
+            # 1. Đánh dấu là người dùng chủ động Pause
+            self.userPaused = True 
+            
+            # 2. Dừng hiển thị hình ảnh
+            self.playEvent.clear()
+            
+            # 3. KHÔNG GỬI LỆNH PAUSE LÊN SERVER (để Buffer vẫn tiếp tục nạp ngầm)
+            print("--> Paused: Dừng hình, Server vẫn đang nạp Buffer...")
 
     def playMovie(self):
-        if self.state == self.READY:
+        """Xử lý nút Play: Bỏ cờ userPaused để cho phép chạy lại."""
+        # Đánh dấu là người dùng muốn xem tiếp
+        self.userPaused = False 
+
+        if self.state == self.READY and self.requestSent != self.PLAY:
             threading.Thread(target=self.listenRtp).start()
             self.playEvent.clear()
             self.sendRtspRequest(self.PLAY)
-            # Bat dau vong lap cap nhat GUI (Consumer)
             self.master.after(100, self.update_image_loop)
+        
+        elif self.state == self.PLAYING:
+            self.playEvent.set()
+            print("--> Resume")
 
     def listenRtp(self):
             while True:
@@ -148,53 +165,46 @@ class Client:
 
     def update_image_loop(self):
         if self.state == self.PLAYING:
-            # 1. Vẽ thanh tiến độ (Giữ nguyên code cũ)
+            # 1. Vẽ thanh tiến độ (Giữ nguyên)
             try:
                 total = getattr(self, 'total_frames', 500)
                 width = self.progressbar.winfo_width()
                 curr_pct = self.frameNbr / total
-                # Buffer % tính cả số lượng đang nằm trong hàng đợi
                 buffer_pct = (self.frameNbr + self.frameQueue.qsize()) / total 
-                
                 if curr_pct > 1: curr_pct = 1 
                 if buffer_pct > 1: buffer_pct = 1
-                
                 self.progressbar.coords(self.buffer_bar, 0, 0, width * buffer_pct, 15)
                 self.progressbar.coords(self.played_bar, 0, 0, width * curr_pct, 15)
             except: pass
 
-            # 2. LOGIC ĐIỀU KHIỂN PLAYBACK (YOUTUBE STYLE)
-            
-            # Nếu hàng đợi cạn sạch (Network lag quá nặng) -> Dừng hình, hiện Buffering
+            # 2. LOGIC ĐIỀU KHIỂN PLAYBACK
+            # Nếu hết buffer -> Dừng hình (Lag)
             if self.frameQueue.qsize() == 0 and self.playEvent.is_set():
                  self.statLabel.config(text="Buffering... (Network lag)")
-                 self.playEvent.clear() # Đánh dấu tạm dừng nội bộ
+                 self.playEvent.clear()
             
-            # Logic hồi phục:
-            # Nếu đang tạm dừng (do mới bấm Play hoặc do Lag)
-            if not self.playEvent.is_set():
-                # Chỉ cần nạp đủ ngưỡng khởi động (5 frame) là chạy lại ngay
+            # Logic hồi phục (Auto-Resume):
+            # CHỈ CHẠY NẾU NGƯỜI DÙNG KHÔNG BẤM PAUSE
+            if not self.playEvent.is_set() and not self.userPaused: 
+                
+                # Nếu đủ buffer thì tự động chạy lại
                 if self.frameQueue.qsize() >= self.BUFFER_START_THRESHOLD:
-                    self.playEvent.set() # Cho phép chạy tiếp
+                    self.playEvent.set()
                     self.statLabel.config(text=f"Playing... Buffer: {self.frameQueue.qsize()}")
                 else:
-                    # Chưa đủ thì chờ tiếp, hiển thị số frame đang nạp
                     self.statLabel.config(text=f"Buffering... {self.frameQueue.qsize()}/{self.BUFFER_START_THRESHOLD}")
                     self.master.after(40, self.update_image_loop)
                     return
 
-            # 3. HIỂN THỊ HÌNH ẢNH (Chỉ chạy khi playEvent được set)
+            # 3. HIỂN THỊ HÌNH ẢNH
             if self.playEvent.is_set():
                 try:
-                    # Lấy frame ra hiển thị
                     frameData = self.frameQueue.get_nowait()
                     self.render_frame_memory(frameData)
                     self.frameNbr += 1
                 except queue.Empty:
                     pass
         
-        # Quan trọng: Client luôn gọi hàm này mỗi 40ms (25 FPS) để giữ đúng tốc độ video
-        # Bất kể Server gửi nhanh thế nào, Client chỉ lấy ra đúng 25 hình/giây
         self.master.after(40, self.update_image_loop)
 
     def render_frame_memory(self, data):
@@ -306,35 +316,61 @@ class Client:
             self.playMovie()
 
     def on_seek(self, event):
-            """Xử lý sự kiện click vào thanh tiến độ để tua."""
-            # Chỉ cho phép tua khi đã SETUP xong (READY hoặc PLAYING)
-            if self.state != self.PLAYING and self.state != self.READY:
-                return
+        """Tua thông minh: Ưu tiên dùng dữ liệu trong Buffer nếu có."""
+        if self.state != self.PLAYING and self.state != self.READY:
+            return
+        self.userPaused = False
+        # 1. Tính toán vị trí frame muốn tua đến
+        width = self.progressbar.winfo_width()
+        percent = event.x / width
+        total = getattr(self, 'total_frames', 500)
+        target_frame = int(percent * total)
 
-            # 1. Tính toán vị trí frame muốn tua đến
-            width = self.progressbar.winfo_width()
-            click_x = event.x
-            percent = click_x / width
-        
-            total = getattr(self, 'total_frames', 500)
-            target_frame = int(percent * total)
-        
-            print(f"Seeking to frame: {target_frame} ({int(percent*100)}%)")
+        # 2. KIỂM TRA: Vị trí bấm có nằm trong Buffer không? (Vùng màu Xám)
+        # self.frameNbr: Frame đang hiện trên màn hình
+        # self.frameQueue.qsize(): Số frame đang chờ trong kho
+        max_buffered_frame = self.frameNbr + self.frameQueue.qsize()
 
-            # 2. Dọn dẹp Buffer Client (QUAN TRỌNG)
-            # Phải xóa sạch buffer cũ để tránh hiện lại các frame của đoạn trước khi tua
-            with self.frameQueue.mutex:
-                self.frameQueue.queue.clear()
-        
-            # Reset các biến đếm phía Client
-            self.frameNbr = target_frame 
-            self.packetLossCount = 0
-            self.currentFrameChunks = bytearray() # Xóa mảnh frame đang lắp dở (nếu có)
-            self.expectedSeqNum = 0 # Reset sequence check để không báo lỗi mất gói ảo
+        # Nếu điểm bấm nằm giữa Hiện tại và Đỉnh Buffer -> Tua Local (Không cần Server)
+        if self.frameNbr < target_frame < max_buffered_frame:
+            frames_to_skip = target_frame - self.frameNbr
+            print(f"--> Smart Seek: Nhảy cóc {frames_to_skip} frame trong Buffer (Không gọi Server)")
+            
+            # Vứt bỏ các frame nằm giữa để nhảy tới đích
+            for _ in range(frames_to_skip):
+                try:
+                    self.frameQueue.get_nowait()
+                except queue.Empty:
+                    break
+            
+            # Cập nhật số frame hiện tại
+            self.frameNbr = target_frame
+            
+            # Cập nhật ngay giao diện thanh đỏ
+            try:
+                curr_pct = self.frameNbr / total
+                self.progressbar.coords(self.played_bar, 0, 0, width * curr_pct, 15)
+            except: pass
+            
+            return # KẾT THÚC HÀM NGAY, KHÔNG GỬI REQUEST
 
-            # 3. Gửi lệnh PLAY kèm Frame-Num mới
-            # Server mới đã hỗ trợ nhận PLAY khi đang PLAYING, nên không cần gửi PAUSE trước
-            self.sendSeekRequest(target_frame)
+        # 3. Nếu bấm ra ngoài Buffer (Vùng Đỏ hoặc Vùng Trắng xa) -> Gọi Server (Logic cũ)
+        print(f"--> Server Seek: Yêu cầu tải lại từ frame {target_frame}")
+        
+        # Dọn dẹp Buffer cũ
+        with self.frameQueue.mutex:
+            self.frameQueue.queue.clear()
+        
+        self.frameNbr = target_frame 
+        self.packetLossCount = 0
+        self.currentFrameChunks = bytearray()
+        self.expectedSeqNum = 0 
+        
+        # Đưa vào trạng thái Buffering để chờ nạp lại
+        self.playEvent.clear() 
+        self.statLabel.config(text=f"Seeking... 0/{self.BUFFER_START_THRESHOLD}")
+
+        self.sendSeekRequest(target_frame)
 
     def sendSeekRequest(self, frameNum):
         self.rtspSeq += 1
