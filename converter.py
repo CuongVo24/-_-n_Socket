@@ -1,4 +1,4 @@
-﻿import cv2
+import cv2
 import sys
 import os
 
@@ -32,7 +32,7 @@ def convert_mp4_to_mjpeg(input_file, output_file):
             # --- CẤU HÌNH KÍCH THƯỚC (QUAN TRỌNG) ---
             # Resize về 800x450 (tỷ lệ 16:9) để chạy mượt trên socket UDP
             # Nếu muốn nét hơn có thể sửa thành (1280, 720) nhưng coi chừng lag
-            frame = cv2.resize(frame, (800, 450)) 
+            frame = cv2.resize(frame, (640, 360)) 
             # -----------------------------------------
 
             # Mã hóa frame thành JPEG
