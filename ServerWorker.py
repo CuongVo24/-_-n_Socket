@@ -144,14 +144,13 @@ class ServerWorker:
             print("500 CONNECTION ERROR")
 
     def sendRtp(self):
-        """Logic gửi RTP tối ưu: Bắn theo chùm (Burst) để nạp Buffer nhanh hơn."""
+        """Chế độ Turbo: Tăng tốc độ nạp Buffer lên mức tối đa."""
         MAX_RTP_PAYLOAD = 1400 
-        packet_count = 0 # Biến đếm để quản lý Burst
+        packet_count = 0 
 
         while True:
-            # 1. Giảm thời gian chờ giữa các frame xuống thấp (5ms)
-            # Server cần gửi nhanh hơn tốc độ xem thực tế để Client có thể "để dành" (cache)
-            self.clientInfo['event'].wait(0.005) 
+            # Thời gian chờ vòng lặp cực nhỏ
+            self.clientInfo['event'].wait(0.001) 
 
             if self.clientInfo['event'].isSet():
                 break
@@ -179,17 +178,19 @@ class ServerWorker:
                         
                         self.clientInfo['rtpSocket'].sendto(packet, (address, port))
                         
-                        # --- TỐI ƯU HÓA TỐC ĐỘ (BURST MODE) ---
-                        # Thay vì ngủ sau mỗi gói tin (rất chậm), ta gửi 5 gói rồi mới ngủ 1 lần
+                        # --- TURBO MODE: BURST 100 GÓI TIN ---
                         packet_count += 1
-                        if packet_count % 5 == 0:
-                             time.sleep(0.001) # Nghỉ cực ngắn để Windows kịp xử lý UDP
-                        # --------------------------------------
+                        # Bắn 100 gói liên tục rồi mới nghỉ 1ms
+                        # Điều này giúp tốc độ nạp nhanh gấp 5 lần so với trước
+                        if packet_count % 100 == 0:
+                             time.sleep(0.001) 
+                        # -------------------------------------
                         
                 except Exception as e:
                     print(f"Connection Error: {e}")
                     break
             else:
+                # Hết video
                 print("End of stream.")
                 self.state = self.READY
                 break
