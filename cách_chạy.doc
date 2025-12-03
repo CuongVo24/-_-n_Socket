@@ -1,6 +1,9 @@
 Cần có 2 thư viện Pillow và opencv
+
 convert file .mp4 sang file Mjpeg(tất cả nằm cùng thư mục với các source code)
+  py converter.py
+
 chạy terminal 1 call port > 1024
 chạy terminal 2 gọi local host 
-  py ClientLauncher.py 127.0.0.1 3000 5000 movie_hd.Mjpeg
+  py ClientLauncher.py 127.0.0.1 3000 5000 <tên file>.Mjpeg
   py Server.py 3000
