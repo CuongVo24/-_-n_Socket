@@ -182,7 +182,7 @@ class ServerWorker:
                         packet_count += 1
                         # Bắn 100 gói liên tục rồi mới nghỉ 1ms
                         # Điều này giúp tốc độ nạp nhanh gấp 5 lần so với trước
-                        if packet_count % 100 == 0:
+                        if packet_count % 50 == 0:
                              time.sleep(0.001) 
                         # -------------------------------------
                         
@@ -205,7 +205,7 @@ class ServerWorker:
             ssrc = 123456 # Random ID
         
             rtpPacket = RtpPacket()
-            rtpPacket.encode(version, padding, extension, cc, seqNum, marker, pt, ssrc, payload)
+            rtpPacket.encode(version, padding, extension, cc, seqNum, marker, pt, ssrc, payload, timestamp)
         
             # Lưu ý: Bài tập dùng frameNumber làm timestamp giả lập.
             # Nếu muốn timestamp thực tế (đồng hồ), cần sửa lại RtpPacket.encode
