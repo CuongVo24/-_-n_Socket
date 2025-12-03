@@ -8,9 +8,9 @@ class RtpPacket:
         self.header = bytearray(self.HEADER_SIZE)
         self.payload = bytearray()
 
-    def encode(self, version, padding, extension, cc, seqnum, marker, pt, ssrc, payload):
+    def encode(self, version, padding, extension, cc, seqnum, marker, pt, ssrc, payload, timestamp=0):
         """Encode the RTP packet with header fields and payload."""
-        timestamp = int(time()) # Lấy timestamp hiện tại
+        
         self.header = bytearray(self.HEADER_SIZE)
         
         # Byte 0: V(2) | P(1) | X(1) | CC(4)
@@ -36,6 +36,10 @@ class RtpPacket:
         self.header[11] = ssrc & 0xFF
         
         self.payload = payload
+
+    # Hàm lấy timestamp (để Client dùng)
+    def timestamp(self):
+        return int(self.header[4] << 24 | self.header[5] << 16 | self.header[6] << 8 | self.header[7])
 
     def decode(self, byteStream):
         """Decode the RTP packet."""
