@@ -142,7 +142,6 @@ class Client:
                     currSeq = rtpPacket.seqNum()
                     
                     # Lấy số Frame thực tế từ header (để vẽ thanh tiến độ chính xác)
-                    # Yêu cầu: Bạn phải đã sửa RtpPacket.py như hướng dẫn trước đó
                     try:
                         server_frame_num = rtpPacket.timestamp()
                     except:
@@ -198,7 +197,6 @@ class Client:
             except Exception as e:
                 if self.teardownAcked == 1:
                     break
-                # print(f"RTP Exception: {e}") # Có thể bật lên để debug nếu cần
                 break
 
     def update_image_loop(self):
@@ -378,77 +376,66 @@ class Client:
             self.playMovie()
 
     def on_seek(self, event):
-        """Tua Siêu Thông Minh: Ưu tiên Cache -> Buffer -> Mới đến Server."""
+        """Tua Logic Chuẩn: Đồng bộ trạng thái Play/Pause trước và sau khi tua."""
         if self.state != self.PLAYING and self.state != self.READY:
             return
-        
-        self.userPaused = False 
 
+        # 1. SNAPSHOT: Lưu lại trạng thái trước khi tua
+        # "Nãy giờ người dùng có đang Pause không?"
+        was_paused = self.userPaused 
+
+        # 2. Tính toán vị trí mới
         width = self.progressbar.winfo_width()
         percent = event.x / width
         total = getattr(self, 'total_frames', 500)
         target_frame = int(percent * total)
 
-        # === CACHE HIT (XỬ LÝ VÙNG ĐỎ) ===
-        # Nếu frame muốn xem ĐÃ CÓ trong kho lưu trữ
-        if target_frame in self.frame_cache:
-            print(f"--> Cache Hit: Lấy frame {target_frame} từ RAM (Siêu tốc)")
-            
-            # 1. Lấy dữ liệu từ cache
-            frame_data = self.frame_cache[target_frame]
-            
-            # 2. Cập nhật vị trí hiện tại
-            self.frameNbr = target_frame
-            
-            # 3. Hiển thị ngay lập tức (Không cần chờ update_image_loop)
-            self.render_frame_memory(frame_data)
-            
-            # 4. Cập nhật thanh đỏ
-            try:
-                self.progressbar.coords(self.played_bar, 0, 0, width * percent, 15)
-            except: pass
-            
-            # QUAN TRỌNG:
-            # Khi tua về quá khứ, Buffer hiện tại (tương lai) trở nên vô nghĩa với vị trí mới.
-            # Tuy nhiên, ta KHÔNG XÓA nó vội, vì lỡ người dùng lại tua tiếp về tương lai thì sao?
-            # Nhưng để đơn giản và tránh lỗi logic hiển thị, ta có thể giữ nguyên Buffer 
-            # và chỉ thay đổi số frame hiển thị.
-            
-            # Nếu đang bị Pause thì bật lại
-            if not self.playEvent.is_set():
-                self.playEvent.set()
-                
-            return # KẾT THÚC, KHÔNG GỌI SERVER
-
-        # === BUFFER HIT (XỬ LÝ VÙNG XÁM) ===
-        max_buffered_frame = self.frameNbr + self.frameQueue.qsize()
-        if self.frameNbr < target_frame < max_buffered_frame:
-            print(f"--> Buffer Hit: Nhảy cóc tới frame {target_frame}")
-            frames_to_skip = target_frame - self.frameNbr
-            for _ in range(frames_to_skip):
-                try: self.frameQueue.get_nowait()
-                except: break
-            self.frameNbr = target_frame
-            try:
-                self.progressbar.coords(self.played_bar, 0, 0, width * percent, 15)
-            except: pass
-            return 
-
-        # === SERVER HIT (VÙNG TRẮNG HOẶC VÙNG ĐỎ QUÁ XA) ===
-        print(f"--> Miss: Phải tải lại từ Server frame {target_frame}...")
-        
-        # Chỉ khi nào bắt buộc phải tải mới thì ta mới dọn dẹp
+        # 3. DỌN DẸP BUFFER (Bắt buộc)
+        # Dù đang Pause hay Play, khi tua đi chỗ khác thì Buffer cũ không còn đúng nữa
         with self.frameQueue.mutex:
             self.frameQueue.queue.clear()
         
+        # Reset các thông số nhận tin để đón luồng dữ liệu mới từ Server
         self.frameNbr = target_frame 
         self.packetLossCount = 0
         self.currentFrameChunks = bytearray()
         self.expectedSeqNum = 0 
         
-        self.playEvent.clear() 
-        self.statLabel.config(text=f"Seeking... (Wait for buffer)")
+        # 4. GỬI LỆNH SEEK
+        # Bảo Server: "Hãy bắt đầu gửi dữ liệu từ frame này đi"
+        # Server sẽ bắt đầu nạp đầy Buffer mới ngay lập tức (nhờ chế độ Burst)
         self.sendSeekRequest(target_frame)
+        
+        # 5. XỬ LÝ HIỂN THỊ (Ưu tiên Cache)
+        # Cập nhật thanh đỏ ngay lập tức cho mượt
+        try:
+            self.progressbar.coords(self.played_bar, 0, 0, width * percent, 15)
+        except: pass
+
+        if target_frame in self.frame_cache:
+            print(f"--> Cache Hit: Hiển thị ngay frame {target_frame}")
+            # Nếu có trong RAM, vẽ ngay lập tức (kể cả đang Pause vẫn vẽ được)
+            self.render_frame_memory(self.frame_cache[target_frame])
+        else:
+            print(f"--> Seeking to {target_frame}...")
+            # Nếu không có Cache, chấp nhận giữ hình cũ hoặc hiện màn hình chờ
+            if not was_paused:
+                self.statLabel.config(text=f"Seeking... (Buffering)")
+
+        # 6. KHÔI PHỤC TRẠNG THÁI (RESTORE STATE)
+        if was_paused:
+            # TRƯỜNG HỢP 1: BAN ĐẦU ĐANG PAUSE
+            # Tua xong vẫn phải Pause
+            self.userPaused = True
+            self.playEvent.clear() # Đảm bảo vòng lặp không tự chạy
+            print(f"--> Trạng thái: Vẫn PAUSE tại frame {target_frame}. Buffer đang nạp ngầm...")
+        else:
+            # TRƯỜNG HỢP 2: BAN ĐẦU ĐANG PLAY
+            # Tua xong phải tự chạy lại
+            self.userPaused = False
+            # Tạm dừng 1 chút để chờ hàm update_image_loop tự kích hoạt khi đủ Buffer
+            self.playEvent.clear() 
+            print(f"--> Trạng thái: Tiếp tục PLAY từ frame {target_frame}")
 
     def sendSeekRequest(self, frameNum):
         self.rtspSeq += 1
