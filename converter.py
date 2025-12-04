@@ -30,8 +30,8 @@ def convert_mp4_to_mjpeg(input_file, output_file):
                 break
 
             # --- CẤU HÌNH KÍCH THƯỚC (QUAN TRỌNG) ---
-            # Chuẩn 1080p
-            frame = cv2.resize(frame, (1920, 1080)) 
+            # Chuẩn 720p
+            frame = cv2.resize(frame, (720, 1080)) 
             # -----------------------------------------
 
             # Mã hóa frame thành JPEG
@@ -78,4 +78,5 @@ if __name__ == "__main__":
         input_video = sys.argv[1]
     
     convert_mp4_to_mjpeg(input_video, output_video)
+
 
