@@ -36,7 +36,7 @@ def convert_mp4_to_mjpeg(input_file, output_file):
 
             # Mã hóa frame thành JPEG
             # quality=75 là đẹp và đủ nhẹ
-            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 75] 
+            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50] 
             result, encimg = cv2.imencode('.jpg', frame, encode_param)
 
             if result:
@@ -46,7 +46,7 @@ def convert_mp4_to_mjpeg(input_file, output_file):
                 # Giới hạn của đồ án: Header chỉ có 5 số => Max size = 99999 bytes (~97KB)
                 if size > 99999:
                     # Nếu ảnh vẫn quá nặng, nén mạnh hơn xuống quality=50
-                    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50]
+                    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 30]
                     _, encimg = cv2.imencode('.jpg', frame, encode_param)
                     data = encimg.tobytes()
                     size = len(data)
@@ -78,5 +78,6 @@ if __name__ == "__main__":
         input_video = sys.argv[1]
     
     convert_mp4_to_mjpeg(input_video, output_video)
+
 
 
